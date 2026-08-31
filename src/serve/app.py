@@ -1,28 +1,39 @@
 import json
 import mlflow
 import torch
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from pathlib import Path
+import numpy as np
+import scipy.spatial.distance as dist
+
+
+from configs.config import MLFLOW_TRACKING_URI, MODEL_URI, STATS_PATH, WINDOW_SIZE
+
+import os
+import mlflow
+
+# In app.py before loading the model:
+tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:///app/mlruns")
+mlflow.set_tracking_uri(tracking_uri)
+
 
 class SensorPayload(BaseModel):
     window_data: list[list[float]]
     
 
-
+ROOT = Path(__file__).resolve().parents[2]
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load Stats
-    dict_path = Path("C:/MLE/aerospace_mle/datasets/processed/output_json.json")
-    with open(dict_path, "r") as f:
+    with open(STATS_PATH, "r") as f:
         app.state.stats = json.load(f)
-        
-    # Load Model from MLflow
-    run_id = "34a55fbcd4b6426c98e9d24e673c0d35"
-    model_uri = f"runs:/{run_id}/model"
-    app.state.model = mlflow.pytorch.load_model(model_uri)
-    
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    app.state.model = mlflow.pytorch.load_model(MODEL_URI, map_location="cpu")
+    app.state.model.eval()
+    app.state.mu = np.load(ROOT / "src/serve/mu.npy")
+    app.state.inv_cov = np.load(ROOT / "src/serve/inv_cov.npy")
     yield
 
 def preprocess_windows(window_data: list[list[float]], stats_dict: dict) -> torch.Tensor:
@@ -66,18 +77,37 @@ def preprocess_windows(window_data: list[list[float]], stats_dict: dict) -> torc
 # Fix: Correct FastAPI initialization
 app = FastAPI(lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # Vite's local ports
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.post("/predict")
 async def predict(payload: SensorPayload):
     # Fix: Pydantic payload unpacking and proper HTTPException handling
-    if len(payload.window_data) != 30:
-        raise HTTPException(status_code=400, detail="Window must contain exactly 30 time steps.")
+    if len(payload.window_data) != WINDOW_SIZE:
+        raise HTTPException(status_code=400, detail=f"Window must contain exactly {WINDOW_SIZE} time steps.")
         
     try:
         tensor_values = preprocess_windows(payload.window_data, app.state.stats)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    
     device = next(app.state.model.parameters()).device
     tensor_values = tensor_values.to(device)
+  
+    feature_vector = tensor_values.squeeze(0).mean(dim=0).cpu().numpy()
+    distance = dist.mahalanobis(feature_vector, app.state.mu, app.state.inv_cov)
+    print(f"\n[SAFETY VALVE] Mahalanobis Distance: {distance:.2f}", flush=True)
+    print(f"[SAFETY VALVE] Statistical Limit: ~7.15\n", flush=True)
+    if distance > 7.15:
+        raise HTTPException(status_code=400, detail=f"OOD Data Detected. Distance {distance:.2f} exceeds threshold.")
+    
+
+        
         
     with torch.no_grad():
         predictions = app.state.model(tensor_values)

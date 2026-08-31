@@ -2,11 +2,12 @@ import pandas as pd
 import numpy as np
 import pytest
 
+from configs.config import PROCESSED_PARQUET_PATH
 
 
 @pytest.fixture(scope='session')
 def processed_df():
-    return pd.read_parquet(r"C:\projects_data\ml_pipeline\data\output_parquet.parquet")
+    return pd.read_parquet(PROCESSED_PARQUET_PATH)
 
 def test_engine_blocks_are_contiguous(processed_df):
     engine_sequence = processed_df["global_engine_id"]

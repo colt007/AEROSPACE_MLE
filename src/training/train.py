@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 # Ensure project root is on sys.path so `src` imports work when running the script directly
@@ -12,35 +11,49 @@ import torch.optim as optim
 import numpy as np
 import mlflow
 import mlflow.pytorch
+from configs.config import (
+    BATCH_SIZE,
+    EPOCHS,
+    HIDDEN_SIZE,
+    LEARNING_RATE,
+    MLFLOW_EXPERIMENT_NAME,
+    MLFLOW_TRACKING_URI,
+    MODEL_OUTPUT_PATH,
+    NUM_FEATURES,
+    PROCESSED_PARQUET_PATH,
+    TRAIN_SPLIT,
+    WEIGHT_DECAY,
+    WINDOW_SIZE,
+)
 from src.data.dataloader import get_dataloaders
 from src.models.model import CMAPSSModel
 
 def main():
     config = {
-        "input_size":24,
-        "window_size": 30,
-        "batch_size": 64,
-        "learning_rate": 1e-3,
-        "weight_decay": 1e-4, # Aggressive regularization for AdamW
-        "epochs": 15,
-        "hidden_size": 128,
-        "train_split": 0.8
+        "input_size": NUM_FEATURES,
+        "window_size": WINDOW_SIZE,
+        "batch_size": BATCH_SIZE,
+        "learning_rate": LEARNING_RATE,
+        "weight_decay": WEIGHT_DECAY,
+        "epochs": EPOCHS,
+        "hidden_size": HIDDEN_SIZE,
+        "train_split": TRAIN_SPLIT,
     }
     
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"executing on {device}")
-    parquet_path = "datasets/processed/output_parquet.parquet"
-    train_loader,val_loader = get_dataloaders(parquet_path,window_size=config['window_size'],batch_size=config["batch_size"],train_split=config['train_split'])
+    train_loader,val_loader = get_dataloaders(PROCESSED_PARQUET_PATH,window_size=config['window_size'],batch_size=config["batch_size"],train_split=config['train_split'])
     model = CMAPSSModel(input_size=config['input_size'],hidden_size=config['hidden_size']).to(device)
     optimizer = optim.AdamW(model.parameters(),lr=config['learning_rate'],weight_decay=config['weight_decay'])
     criterion = nn.MSELoss()
     
-    mlflow.set_experiment('CMAPSS_BASELINE')
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
     with mlflow.start_run():
         mlflow.log_params(config)
         best_val_rmse = float('inf')
-        os.makedirs('models',exist_ok=True)
-        best_model_path = "models/first_model.pt"
+        MODEL_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        best_model_path = MODEL_OUTPUT_PATH
         print("initializing training loop")
         for epoch in range(1,config['epochs']+1):
             model.train()

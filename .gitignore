@@ -2,7 +2,13 @@
 __pycache__/
 node_modules/
 .env
+.env.example
 ml_aerospace_pipeline
 aerospace_mle
 datasets
 models
+.dockerignore
+dockerfile
+requirements.txt
+src/serve/inv_cov.npy
+src/serve/mu.npy

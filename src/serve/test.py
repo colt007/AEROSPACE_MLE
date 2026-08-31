@@ -1,10 +1,11 @@
 import requests
 import pandas as pd
-from pathlib import Path
+
+from configs.config import API_URL, TRAIN_DATA_PATH, WINDOW_SIZE
 
 # 1. Point to the RAW CMAPSS data (not the Parquet)
 # Adjust this path if your raw text file is located somewhere else
-raw_file_path = Path("C:/projects_data/data/raw/train_FD001.txt")
+raw_file_path = TRAIN_DATA_PATH
 
 print("Loading raw engine data...")
 # CMAPSS text files are space-separated with no headers
@@ -16,7 +17,7 @@ engine_1 = df[df['unit_nr'] == 1].copy()
 
 # 3. Grab the LAST 30 flights before catastrophic failure
 # If the model understands physics, it should predict an RUL close to 0
-window_df = engine_1.tail(30).copy()
+window_df = engine_1.tail(WINDOW_SIZE).copy()
 
 # 4. Drop 'unit_nr' and 'time_cycles' to match the 24-column API schema
 window_df = window_df.drop(columns=['unit_nr', 'time_cycles'])
@@ -30,7 +31,7 @@ payload = {
 
 # 5. Fire the payload at the local server
 print(f"Sending 30 flights of physical engine data to the API...")
-response = requests.post("http://127.0.0.1:8000/predict", json=payload)
+response = requests.post(f"{API_URL}/predict", json=payload)
 
 print(f"Status Code: {response.status_code}")
 try:

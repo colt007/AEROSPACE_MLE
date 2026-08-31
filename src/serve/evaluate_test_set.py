@@ -3,19 +3,25 @@ import torch
 import mlflow
 import pandas as pd
 import numpy as np
-from pathlib import Path
 from sklearn.metrics import mean_squared_error
 
-# 1. Define Paths (Adjust these if your directories are different)
-raw_test_path = Path("C:/projects_data/data/raw/test_FD001.txt")
-raw_rul_path = Path("C:/projects_data/data/raw/RUL_FD001.txt")
-stats_path = Path("C:/MLE/aerospace_mle/datasets/processed/output_json.json")
+from configs.config import (
+    MLFLOW_TRACKING_URI,
+    MODEL_URI,
+    RUL_DATA_PATH,
+    STATS_PATH,
+    TEST_DATA_PATH,
+    WINDOW_SIZE,
+)
+
+raw_test_path = TEST_DATA_PATH
+raw_rul_path = RUL_DATA_PATH
+stats_path = STATS_PATH
 
 # 2. Load the Model from MLflow and move to GPU if available
 print("Loading architecture and weights...")
-run_id = "34a55fbcd4b6426c98e9d24e673c0d35"  # Your successful run ID
-model_uri = f"runs:/{run_id}/model"
-model = mlflow.pytorch.load_model(model_uri)
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+model = mlflow.pytorch.load_model(MODEL_URI, map_location="cpu")
 device = next(model.parameters()).device
 model.eval()
 
@@ -44,10 +50,10 @@ for engine_id in engine_ids:
     engine_data = test_df[test_df['unit_nr'] == engine_id]
     
     # We only want the final 30 flights to predict the final RUL
-    if len(engine_data) < 30:
+    if len(engine_data) < WINDOW_SIZE:
         continue # Skip engines that don't have enough history for our window size
         
-    window_df = engine_data.tail(30).drop(columns=['unit_nr', 'time_cycles'])
+    window_df = engine_data.tail(WINDOW_SIZE).drop(columns=['unit_nr', 'time_cycles'])
     window_data = window_df.values.tolist()
     
     # 7. Apply the exact API Normalization Logic (The Safety Valve)
