@@ -61,7 +61,11 @@ def preprocess_windows(window_data: list[list[float]], stats_dict: dict) -> torc
             std_sensor = stats_dict[op_combined][f"sensor_{sensor_idx}_std"]
             
             if std_sensor == 0.0:
-                norm_val = 0.0
+                if abs(row_data-mean_sensor)>1e-4:
+                    raise HTTPException(status_code=400,detail=f"Hardware Failure: Sensor{sensor_idx} deviating from constant baseline")
+                    
+                else:
+                    norm_val = 0.0
             else:
                 norm_val = (row_data - mean_sensor) / std_sensor
                 
