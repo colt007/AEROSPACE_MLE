@@ -1,4 +1,5 @@
 import json
+import pickle
 import mlflow
 import torch
 from pathlib import Path
@@ -22,9 +23,12 @@ mlflow.set_tracking_uri(tracking_uri)
 
 class SensorPayload(BaseModel):
     window_data: list[list[float]]
-    
+
 
 ROOT = Path(__file__).resolve().parents[2]
+global_condition_matrices = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     with open(STATS_PATH, "r") as f:
@@ -32,8 +36,10 @@ async def lifespan(app: FastAPI):
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     app.state.model = mlflow.pytorch.load_model(MODEL_URI, map_location="cpu")
     app.state.model.eval()
-    app.state.mu = np.load(ROOT / "src/serve/mu.npy")
-    app.state.inv_cov = np.load(ROOT / "src/serve/inv_cov.npy")
+    global global_condition_matrices
+    print("Loading Condition-Specific Mahalanobis Matrices...", flush=True)
+    with open(ROOT / "src/serve/condition_matrices.pkl", "rb") as f:
+        global_condition_matrices = pickle.load(f)
     yield
 
 def preprocess_windows(window_data: list[list[float]], stats_dict: dict) -> torch.Tensor:
@@ -103,9 +109,32 @@ async def predict(payload: SensorPayload):
     device = next(app.state.model.parameters()).device
     tensor_values = tensor_values.to(device)
   
-    feature_vector = tensor_values.squeeze(0).mean(dim=0).cpu().numpy()
-    distance = dist.mahalanobis(feature_vector, app.state.mu, app.state.inv_cov)
-    print(f"\n[SAFETY VALVE] Mahalanobis Distance: {distance:.2f}", flush=True)
+    raw_window_data = payload.window_data
+    current_raw_row = raw_window_data[-1]
+    first_op = int(abs(round(current_raw_row[0], 0)))
+    second_op = abs(round(current_raw_row[1], 2))
+    third_op = int(abs(round(current_raw_row[2], 0)))
+    current_condition_key = f"{first_op}_{second_op}_{third_op}"
+
+    normalized_array = tensor_values.squeeze(0).cpu().numpy()
+    current_normalized_sensors = normalized_array[-1][3:]
+
+    try:
+        condition_matrices = global_condition_matrices[current_condition_key]
+        mu = condition_matrices["mu"]
+        inv_cov = condition_matrices["inv_cov"]
+        distance = dist.mahalanobis(current_normalized_sensors, mu, inv_cov)
+    except KeyError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No safety matrices found for condition: {current_condition_key}",
+        )
+
+    print(
+        f"\n[SAFETY VALVE] Condition: {current_condition_key} | "
+        f"Distance: {distance:.2f}",
+        flush=True,
+    )
     print(f"[SAFETY VALVE] Statistical Limit: ~7.15\n", flush=True)
     if distance > 7.15:
         raise HTTPException(status_code=400, detail=f"OOD Data Detected. Distance {distance:.2f} exceeds threshold.")
