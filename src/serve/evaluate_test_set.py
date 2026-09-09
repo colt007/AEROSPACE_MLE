@@ -14,6 +14,8 @@ from configs.config import (
     WINDOW_SIZE,
 )
 
+MAX_RUL = 130
+
 raw_test_path = TEST_DATA_PATH
 raw_rul_path = RUL_DATA_PATH
 stats_path = STATS_PATH
@@ -85,7 +87,7 @@ for engine_id in engine_ids:
         
     predictions.append(pred_rul)
     # engine_id is 1-indexed, array is 0-indexed
-    actuals.append(true_rul_array[engine_id - 1])
+    actuals.append(min(true_rul_array[engine_id - 1], MAX_RUL))
 
 # 8. Calculate Final Mathematical Score
 rmse = np.sqrt(mean_squared_error(actuals, predictions))
