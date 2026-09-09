@@ -13,3 +13,6 @@ requirements.txt
 src/serve/inv_cov.npy
 src/serve/mu.npy
 src/serve/condition_matrices.pkl
+configs/
+mlflow.db
+
