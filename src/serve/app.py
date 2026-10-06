@@ -1,3 +1,4 @@
+import asyncio
 import json
 import pickle
 import mlflow
@@ -84,6 +85,12 @@ def preprocess_windows(window_data: list[list[float]], stats_dict: dict) -> torc
     
     return tensor_window
 
+
+def run_model_inference(model, tensor_values: torch.Tensor) -> torch.Tensor:
+    """Run PyTorch inference in a worker thread without tracking gradients."""
+    with torch.inference_mode():
+        return model(tensor_values)
+
 # Fix: Correct FastAPI initialization
 app = FastAPI(lifespan=lifespan)
 
@@ -97,7 +104,6 @@ app.add_middleware(
 
 @app.post("/predict")
 async def predict(payload: SensorPayload):
-    # Fix: Pydantic payload unpacking and proper HTTPException handling
     if len(payload.window_data) != WINDOW_SIZE:
         raise HTTPException(status_code=400, detail=f"Window must contain exactly {WINDOW_SIZE} time steps.")
         
@@ -138,12 +144,9 @@ async def predict(payload: SensorPayload):
     print(f"[SAFETY VALVE] Statistical Limit: ~7.15\n", flush=True)
     if distance > 7.15:
         raise HTTPException(status_code=400, detail=f"OOD Data Detected. Distance {distance:.2f} exceeds threshold.")
-    
-
-        
-        
-    with torch.no_grad():
-        predictions = app.state.model(tensor_values)
-        
-    # Fix: Return standard Python dict, FastAPI converts it to JSON automatically
+    predictions = await asyncio.to_thread(
+        run_model_inference,
+        app.state.model,
+        tensor_values,
+    )
     return {"predicted_rul": float(predictions.item())}
