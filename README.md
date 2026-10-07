@@ -327,6 +327,4 @@ This documentation is intended to accompany the final portfolio article and show
 
 ---
 
-## License
 
-Add the license you intend to use before publishing the repository publicly.
